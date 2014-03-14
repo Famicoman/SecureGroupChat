@@ -1,45 +1,54 @@
 #!/usr/bin/env python
 # Hybrid Client/Server
-# - YOU MUST RUN THESE FOR CERT CREATION -
+#
+# - YOU MUST RUN THESE FOR CERT/KEY CREATION -
 #
 # openssl genrsa 1024 > key
 # openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
 #
 
-import random, math
-import fractions
 import sys               
 import socket
 import string
-import time
 import threading
+import time
 from OpenSSL import SSL
 
-exit=0
-client_list={}
+exit = 0
+client_list= dict()
 
 class sending(threading.Thread):
 	def run(self):
-		print "Type to send an excrypted message."
+		global exit
+		global client_list
+		print "[TYPE TO SEND MESSAGE (/q TO QUIT)]"
         	data = ""
         	while data.startswith("/q")==False:
             		data = sys.stdin.readline()
 			if (sys.argv[1] == "s"):
 				for key in client_list:
-					client_list[key].write(data)#send(data)
+					client_list[key].write(data)
 			else:
-				clisock.write(data)#send(data) #Send command
+				clisock.write(data) # Send command
 		exit = 1
-		#clisock.close()
-		#self.join()
+		print "[YOU HAVE EXITED]"
+		if (sys.argv[1] == "s"):
+			for key in client_list:
+                        	client_list[key].close()
+			srvsock.close() # This causes a crash on the server 
+		
 		
 class receiving(threading.Thread):
 	def run(self):
+		global exit
+		global client_list
 		while exit==0:
-            		data = clisock.read()#repr(clisock.recv(65535)) #clisock.recv(1024)
-			print data#.replace('\r','').replace('\n','') #Print message from server
-		clisock.close()
-		#self.join()
+            		data = clisock.read()
+			data = data[0:-1]
+			if data.startswith("/q"):
+				exit = 1;
+			else:
+				print data
 
 class servreceiving(threading.Thread):
 
@@ -49,27 +58,42 @@ class servreceiving(threading.Thread):
 		threading.Thread.__init__(self)
 	
 	def run(self):
-		while exit==0:
-			data = repr(self.connection.recv(65535))#(1024)
-			print data #Print message from server
-			for key in client_list:
-				client_list[key].write(data)#send(data)
-		self.join()
+		global exit
+		global client_list
+		while 1:
+			data = repr(self.connection.recv(65535))
+			data = data[1:-2]
+			if data.startswith("/q"):
+				self.connection.write("/q/")
+				del client_list[self.address]
+				print "[A CLIENT HAS EXITED]"
+				for key in client_list:
+                                        if key!=self.address:
+                                                client_list[key].write("[A CLIENT HAS EXITED]/")
+				break
+			else:
+				output = data[0:-1]
+				print output # Print message from server
+				for key in client_list:
+					if key!=self.address:
+						client_list[key].write(data)
 				
 class newconnection(threading.Thread):
 	 def run(self):
-		print "Server listening for connections"
-		while 1:
+		global exit
+		global client_list
+		print "[SERVER LISTENING FOR CONNECTIONS]"
+		while exit==0:
 			connection, address = srvsock.accept()
+			timestamp = time.time()
 			print "[NEW CLIENT CONNECTED]"
-			client_list[address] = connection
-			servrec = servreceiving(address,connection)
+			client_list[str(address)+"-"+str(timestamp)] = connection
+			servrec = servreceiving(str(address)+"-"+str(timestamp),connection)
 			servrec.start()
-
 		
-# ./securegroupchat s
+# ./cliserv.py s
 if (sys.argv[1] == "s"):
-	#Make socket
+	# Make socket
 	srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
 	
 	### SERVER SSL ###
@@ -79,15 +103,18 @@ if (sys.argv[1] == "s"):
 	srvsock = SSL.Connection(context, srvsock)
 	##################
 
-	srvsock.bind( ('', 31337)) 
+	srvsock.bind( ('127.0.0.1', 31337)) 
 	srvsock.listen( 5 )
 	
 	n = newconnection()
 	n.start()
 	s = sending()
 	s.start()
+
+	s.join()
+	srvsock.close()
 	
-#./securegroupchat c $serveraddress
+#./cliserv.py c $serveraddress
 if (sys.argv[1] == "c"):
 	clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
 	clisock.connect( ("127.0.0.1", 31337) )
