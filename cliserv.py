@@ -12,6 +12,7 @@ import socket
 import string
 import threading
 import time
+import ssl
 from OpenSSL import SSL
 
 exit = 0
@@ -120,7 +121,8 @@ if (sys.argv[1] == "c"):
 	clisock.connect( ("127.0.0.1", 31337) )
 
 	### CLIENT SSL ###
-	clisock = socket.ssl(clisock)
+	#clisock = socket.ssl(clisock)
+	clisock = ssl.wrap_socket(clisock, ca_certs="cert", cert_reqs=ssl.CERT_REQUIRED)
 	##################
 
 	print "[CONNECTED TO SERVER]"	
