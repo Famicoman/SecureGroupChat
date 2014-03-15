@@ -9,6 +9,9 @@ server:
 client:
 	./cliserv.py c
 
+generate:
+	./keymaker.py $1
+
 clean:
 	rm key
 	rm cert
