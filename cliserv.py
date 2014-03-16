@@ -3,7 +3,7 @@
 #
 # - YOU MUST RUN THESE FOR CERT/KEY CREATION -
 #
-# openssl genrsa 1024 > key
+# openssl genrsa 4096 > key
 # openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
 #
 
@@ -13,24 +13,68 @@ import string
 import threading
 import time
 import ssl
+import os
 from OpenSSL import SSL
+from Crypto.PublicKey import RSA
+from Crypto import Random
+from Crypto.Cipher import *
+from base64 import b64decode
+
+def decrypt(private_key, package):
+        rsakey = RSA.importKey(private_key)
+        #rsakey = PKCS1_OAEP.new(rsakey)
+        decrypted = rsakey.decrypt(b64decode(package))
+        return decrypted
+
+def encrypt(public_key, message):
+        rsakey = RSA.importKey(public_key)
+        #rsakey = PKCS1_OAEP(rsakey)
+        encrypted = rsakey.encrypt(message,32)
+        return encrypted[0].encode('base64')
 
 exit = 0
 client_list= dict()
+users = dict()
+privkey = ""
+serverkey = ""
+
+def openUsers():
+	numusers = int(sys.argv[3])
+	print "[NUMBER OF USERS: "+str(numusers)+"]"
+	num = 4+numusers
+	for x in range(4,num):
+		if len(sys.argv[x])>0:
+			if os.path.isfile('keys/'+sys.argv[x]+'.pub'):
+				print "[LOADED USER "+sys.argv[x]+"]"
+				data = open('keys/'+sys.argv[x]+'.pub').read()
+				data = data.strip()
+				users[sys.argv[x]] = data
+			else:
+				print "[FAILED TO LOAD USER "+sys.argv[x]+"]"
+				return 0
+		else:
+			return 0
+	return 1
 
 class sending(threading.Thread):
 	def run(self):
 		global exit
 		global client_list
+		global users
+		global serverkey
 		print "[TYPE TO SEND MESSAGE (/q TO QUIT)]"
         	data = ""
         	while data.startswith("/q")==False:
             		data = sys.stdin.readline()
+			olddata = data
 			if (sys.argv[1] == "s"):
 				for key in client_list:
-					client_list[key].write(data)
+					thisdata = encrypt(users[key],data)
+					client_list[key].write(thisdata)
 			else:
+				data = encrypt(serverkey,data)
 				clisock.write(data) # Send command
+			data = olddata
 		exit = 1
 		print "[YOU HAVE EXITED]"
 		if (sys.argv[1] == "s"):
@@ -43,9 +87,12 @@ class receiving(threading.Thread):
 	def run(self):
 		global exit
 		global client_list
+		global privkey
 		while exit==0:
             		data = clisock.read()
-			data = data[0:-1]
+                        data = data.replace("\\n",'')
+			data = decrypt(privkey,data)
+			data = data.strip()
 			if data.startswith("/q"):
 				exit = 1;
 			else:
@@ -61,23 +108,30 @@ class servreceiving(threading.Thread):
 	def run(self):
 		global exit
 		global client_list
+		global users
+		global privkey
 		while 1:
 			data = repr(self.connection.recv(65535))
-			data = data[1:-2]
+			data = data[1:-3]
+                        data = data.replace("\\n",'')
+			data = decrypt(privkey, data)
+			#data = data[1:-2]
 			if data.startswith("/q"):
-				self.connection.write("/q/")
+				self.connection.write(encrypt(users[self.address],"/q"))
 				del client_list[self.address]
 				print "[A CLIENT HAS EXITED]"
 				for key in client_list:
                                         if key!=self.address:
-                                                client_list[key].write("[A CLIENT HAS EXITED]/")
+						data = encrypt(users[key],"[A CLIENT HAS EXITED]")
+                                                client_list[key].write(data)
 				break
 			else:
 				output = data[0:-1]
 				print output # Print message from server
 				for key in client_list:
 					if key!=self.address:
-						client_list[key].write(data)
+						thisdata = encrypt(users[key],data)
+						client_list[key].write(thisdata)
 				
 class newconnection(threading.Thread):
 	 def run(self):
@@ -86,13 +140,24 @@ class newconnection(threading.Thread):
 		print "[SERVER LISTENING FOR CONNECTIONS]"
 		while exit==0:
 			connection, address = srvsock.accept()
-			timestamp = time.time()
-			print "[NEW CLIENT CONNECTED]"
-			client_list[str(address)+"-"+str(timestamp)] = connection
-			servrec = servreceiving(str(address)+"-"+str(timestamp),connection)
-			servrec.start()
-		
-# ./cliserv.py s
+			print "[USER ATTEMPTING TO CONNECT]"
+			#timestamp = time.time()
+			data = repr(connection.recv(65535))
+			data = data[1:-3]
+			data = data.replace("\\n",'')
+			data = decrypt(privkey,data)
+			if data in users:
+				print "[USER "+data+" IDENTIFIED & CONNECTED]"
+				#print "[NEW CLIENT CONNECTED]"
+				#client_list[str(address)+"-"+str(timestamp)] = connection
+				client_list[data] = connection
+				#servrec = servreceiving(str(address)+"-"+str(timestamp),connection)
+				servrec = servreceiving(data,connection)
+				servrec.start()
+
+privkey = open('keys/'+sys.argv[2]+'.priv').read()		
+
+# ./cliserv.py s $name $numusers $user1 $user2 ...
 if (sys.argv[1] == "s"):
 	# Make socket
 	srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
@@ -103,6 +168,8 @@ if (sys.argv[1] == "s"):
 	context.use_certificate_file('cert')
 	srvsock = SSL.Connection(context, srvsock)
 	##################
+
+	openUsers()
 
 	srvsock.bind( ('127.0.0.1', 31337)) 
 	srvsock.listen( 5 )
@@ -115,7 +182,7 @@ if (sys.argv[1] == "s"):
 	s.join()
 	srvsock.close()
 	
-#./cliserv.py c $serveraddress
+#./cliserv.py c $name $serveruser
 if (sys.argv[1] == "c"):
 	clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
 	clisock.connect( ("127.0.0.1", 31337) )
@@ -124,6 +191,11 @@ if (sys.argv[1] == "c"):
 	#clisock = socket.ssl(clisock)
 	clisock = ssl.wrap_socket(clisock, ca_certs="cert", cert_reqs=ssl.CERT_REQUIRED)
 	##################
+
+	serverkey = open('keys/'+sys.argv[3]+'.pub').read()
+
+	data = encrypt(serverkey,sys.argv[2])
+	clisock.write(data)
 
 	print "[CONNECTED TO SERVER]"	
 	r = receiving()
