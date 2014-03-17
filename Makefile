@@ -5,13 +5,13 @@ all:
 	openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
 	
 server:
-	./cliserv.py s mike 2 luke bob
+	./cliserv.py s mike 31337 2 luke bob
 
 clientluke:
-	./cliserv.py c luke mike
+	./cliserv.py c luke 127.0.0.1:31337 mike
 
 clientbob:
-	./cliserv.py c bob mike
+	./cliserv.py c bob 127.0.0.1:31337 mike
 
 generate:
 	./keymaker.py mike

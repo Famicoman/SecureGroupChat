@@ -39,10 +39,10 @@ privkey = ""
 serverkey = ""
 
 def openUsers():
-	numusers = int(sys.argv[3])
+	numusers = int(sys.argv[4])
 	print "[NUMBER OF USERS: "+str(numusers)+"]"
-	num = 4+numusers
-	for x in range(4,num):
+	num = 5+numusers
+	for x in range(5,num):
 		if len(sys.argv[x])>0:
 			if os.path.isfile('keys/'+sys.argv[x]+'.pub'):
 				print "[LOADED USER "+sys.argv[x]+"]"
@@ -69,10 +69,10 @@ class sending(threading.Thread):
 			olddata = data
 			if (sys.argv[1] == "s"):
 				for key in client_list:
-					thisdata = encrypt(users[key],data)
+					thisdata = encrypt(users[key],"<"+sys.argv[2]+"> "+data)
 					client_list[key].write(thisdata)
 			else:
-				data = encrypt(serverkey,data)
+				data = encrypt(serverkey,"<"+sys.argv[2]+"> "+data)
 				clisock.write(data) # Send command
 			data = olddata
 		exit = 1
@@ -93,7 +93,7 @@ class receiving(threading.Thread):
                         data = data.replace("\\n",'')
 			data = decrypt(privkey,data)
 			data = data.strip()
-			if data.startswith("/q"):
+			if data.find("/q")!=-1:#startswith("/q"):
 				exit = 1;
 			else:
 				print data
@@ -116,7 +116,7 @@ class servreceiving(threading.Thread):
                         data = data.replace("\\n",'')
 			data = decrypt(privkey, data)
 			#data = data[1:-2]
-			if data.startswith("/q"):
+			if data.find("/q")!=-1:#startswith("/q"):
 				self.connection.write(encrypt(users[self.address],"/q"))
 				del client_list[self.address]
 				print "[A CLIENT HAS EXITED]"
@@ -157,7 +157,7 @@ class newconnection(threading.Thread):
 
 privkey = open('keys/'+sys.argv[2]+'.priv').read()		
 
-# ./cliserv.py s $name $numusers $user1 $user2 ...
+# ./cliserv.py s $name $port $numusers $user1 $user2 ...
 if (sys.argv[1] == "s"):
 	# Make socket
 	srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
@@ -171,7 +171,7 @@ if (sys.argv[1] == "s"):
 
 	openUsers()
 
-	srvsock.bind( ('127.0.0.1', 31337)) 
+	srvsock.bind( ('', int(sys.argv[3]))) 
 	srvsock.listen( 5 )
 	
 	n = newconnection()
@@ -182,17 +182,21 @@ if (sys.argv[1] == "s"):
 	s.join()
 	srvsock.close()
 	
-#./cliserv.py c $name $serveruser
+#./cliserv.py c $name $address:port $serveruser
 if (sys.argv[1] == "c"):
 	clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-	clisock.connect( ("127.0.0.1", 31337) )
+	if sys.argv[3].find(":") == -1:
+		clisock.connect( (sys.argv[3], 31337) )
+	else:
+		addressport = sys.argv[3].split(":")
+		clisock.connect( (addressport[0], int(addressport[1])) )
 
 	### CLIENT SSL ###
 	#clisock = socket.ssl(clisock)
 	clisock = ssl.wrap_socket(clisock, ca_certs="cert", cert_reqs=ssl.CERT_REQUIRED)
 	##################
 
-	serverkey = open('keys/'+sys.argv[3]+'.pub').read()
+	serverkey = open('keys/'+sys.argv[4]+'.pub').read()
 
 	data = encrypt(serverkey,sys.argv[2])
 	clisock.write(data)
