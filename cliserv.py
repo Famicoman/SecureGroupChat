@@ -72,7 +72,7 @@ class sending(threading.Thread):
 					thisdata = encrypt(users[key],"<"+sys.argv[2]+"> "+data)
 					client_list[key].write(thisdata)
 			else:
-				data = encrypt(serverkey,"<"+sys.argv[2]+"> "+data)
+				data = encrypt(serverkey,data)
 				clisock.write(data) # Send command
 			data = olddata
 		exit = 1
@@ -100,8 +100,8 @@ class receiving(threading.Thread):
 
 class servreceiving(threading.Thread):
 
-	def __init__(self, address, connection):
-		self.address = address
+	def __init__(self, user, connection):
+		self.user = user
 		self.connection = connection
 		threading.Thread.__init__(self)
 	
@@ -117,20 +117,20 @@ class servreceiving(threading.Thread):
 			data = decrypt(privkey, data)
 			#data = data[1:-2]
 			if data.find("/q")!=-1:#startswith("/q"):
-				self.connection.write(encrypt(users[self.address],"/q"))
-				del client_list[self.address]
+				self.connection.write(encrypt(users[self.user],"/q"))
+				del client_list[self.user]
 				print "[A CLIENT HAS EXITED]"
 				for key in client_list:
-                                        if key!=self.address:
+                                        if key!=self.user:
 						data = encrypt(users[key],"[A CLIENT HAS EXITED]")
                                                 client_list[key].write(data)
 				break
 			else:
 				output = data[0:-1]
-				print output # Print message from server
+				print "<"+self.user+"> "+output # Print message from server
 				for key in client_list:
-					if key!=self.address:
-						thisdata = encrypt(users[key],data)
+					if key!=self.user:
+						thisdata = encrypt(users[key], "<"+self.user+"> "+data)
 						client_list[key].write(thisdata)
 				
 class newconnection(threading.Thread):
