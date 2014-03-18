@@ -5,210 +5,195 @@
 #
 # openssl genrsa 4096 > key
 # openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
-#
 
-import sys               
+import sys
 import socket
-import string
 import threading
-import time
-import ssl
 import os
-from OpenSSL import SSL
-from Crypto.PublicKey import RSA
-from Crypto import Random
-from Crypto.Cipher import *
-from base64 import b64decode
+import ssl
 
-def decrypt(private_key, package):
-        rsakey = RSA.importKey(private_key)
-        #rsakey = PKCS1_OAEP.new(rsakey)
-        decrypted = rsakey.decrypt(b64decode(package))
-        return decrypted
+MAX_QUEUED_CONNECTIONS=5
+DEFAULT_PORT = 31337
 
-def encrypt(public_key, message):
-        rsakey = RSA.importKey(public_key)
-        #rsakey = PKCS1_OAEP(rsakey)
-        encrypted = rsakey.encrypt(message,32)
-        return encrypted[0].encode('base64')
-
-exit = 0
-client_list= dict()
-users = dict()
-privkey = ""
-serverkey = ""
-
-def openUsers():
-	numusers = int(sys.argv[4])
-	print "[NUMBER OF USERS: "+str(numusers)+"]"
-	num = 5+numusers
-	for x in range(5,num):
-		if len(sys.argv[x])>0:
-			if os.path.isfile('keys/'+sys.argv[x]+'.pub'):
-				print "[LOADED USER "+sys.argv[x]+"]"
-				data = open('keys/'+sys.argv[x]+'.pub').read()
-				data = data.strip()
-				users[sys.argv[x]] = data
-			else:
-				print "[FAILED TO LOAD USER "+sys.argv[x]+"]"
-				return 0
-		else:
-			return 0
-	return 1
+connected_users = set() #set of names of users that are currently connected
+client_list= dict() #maps names of users to connections, used by server only
 
 class sending(threading.Thread):
-	def run(self):
-		global exit
-		global client_list
-		global users
-		global serverkey
-		print "[TYPE TO SEND MESSAGE (/q TO QUIT)]"
-        	data = ""
-        	while data.startswith("/q")==False:
-            		data = sys.stdin.readline()
-			olddata = data
-			if (sys.argv[1] == "s"):
-				for key in client_list:
-					thisdata = encrypt(users[key],"<"+sys.argv[2]+"> "+data)
-					client_list[key].write(thisdata)
-			else:
-				data = encrypt(serverkey,data)
-				clisock.write(data) # Send command
-			data = olddata
-		exit = 1
-		print "[YOU HAVE EXITED]"
-		if (sys.argv[1] == "s"):
-			for key in client_list:
-                        	client_list[key].close()
-			srvsock.close() # This causes a crash on the server 
-		
-		
+    def run(self):
+        print "[TYPE TO SEND MESSAGE (/q TO QUIT)]"
+
+        exit=False
+        while not exit:
+            data = sys.stdin.readline().strip()
+            if data.startswith("/q"):
+                exit = True
+
+            if mode == "s":
+               for user in client_list:
+                   client_list[user].write("<"+name+"> "+data)
+            else:
+                clisock.write(data) # Send command
+
+        print "[YOU HAVE EXITED]"
+        if (mode == "s"):
+            for user in client_list:
+                client_list[user].close()
+            srvsock.close() # This causes a crash on the server 
+
+        os._exit(1)
+
 class receiving(threading.Thread):
-	def run(self):
-		global exit
-		global client_list
-		global privkey
-		while exit==0:
-            		data = clisock.read()
-                        data = data.replace("\\n",'')
-			data = decrypt(privkey,data)
-			data = data.strip()
-			if data.find("/q")!=-1:#startswith("/q"):
-				exit = 1;
-			else:
-				print data
+    def run(self):
+        while True: #exit==0:
+            data = clisock.read()
+            if len(data) == 0: #not really sure what read does if there's a socket error, not much documentation, hopefully this is right 
+                print>>sys.stderr, "SOCKET ERROR - CLOSING"
+                os._exit(1)
+                #exit = 1
+
+            if data.find("/q")!=-1:#startswith("/q"):
+                print "[SERVER EXITED - CLOSING CHAT]"
+                os._exit(1)
+                #exit = 1;
+            else:
+                print data
 
 class servreceiving(threading.Thread):
 
-	def __init__(self, user, connection):
-		self.user = user
-		self.connection = connection
-		threading.Thread.__init__(self)
-	
-	def run(self):
-		global exit
-		global client_list
-		global users
-		global privkey
-		while 1:
-			data = repr(self.connection.recv(65535))
-			data = data[1:-3]
-                        data = data.replace("\\n",'')
-			data = decrypt(privkey, data)
-			#data = data[1:-2]
-			if data.find("/q")!=-1:#startswith("/q"):
-				self.connection.write(encrypt(users[self.user],"/q"))
-				del client_list[self.user]
-				print "[A CLIENT HAS EXITED]"
-				for key in client_list:
-                                        if key!=self.user:
-						data = encrypt(users[key],"[A CLIENT HAS EXITED]")
-                                                client_list[key].write(data)
-				break
-			else:
-				output = data[0:-1]
-				print "<"+self.user+"> "+output # Print message from server
-				for key in client_list:
-					if key!=self.user:
-						thisdata = encrypt(users[key], "<"+self.user+"> "+data)
-						client_list[key].write(thisdata)
-				
-class newconnection(threading.Thread):
-	 def run(self):
-		global exit
-		global client_list
-		print "[SERVER LISTENING FOR CONNECTIONS]"
-		while exit==0:
-			connection, address = srvsock.accept()
-			print "[USER ATTEMPTING TO CONNECT]"
-			#timestamp = time.time()
-			data = repr(connection.recv(65535))
-			data = data[1:-3]
-			data = data.replace("\\n",'')
-			data = decrypt(privkey,data)
-			if data in users:
-				print "[USER "+data+" IDENTIFIED & CONNECTED]"
-				#print "[NEW CLIENT CONNECTED]"
-				#client_list[str(address)+"-"+str(timestamp)] = connection
-				client_list[data] = connection
-				#servrec = servreceiving(str(address)+"-"+str(timestamp),connection)
-				servrec = servreceiving(data,connection)
-				servrec.start()
+    def __init__(self, user, connection):
+        self.user = user
+        self.connection = connection
+        threading.Thread.__init__(self)
 
-privkey = open('keys/'+sys.argv[2]+'.priv').read()		
+    def run(self):
+        global client_list
+        global connected_users
+
+        while True:
+            data = self.connection.read()
+            if data.find("/q")!=-1:
+                self.connection.write("/q")
+                client_list[self.user].close()
+                del client_list[self.user]
+                connected_users.remove(self.user)
+
+                message = "[{0} HAS EXITED]".format(self.user)
+                print message
+
+                for user in connected_users:
+                    if user!=self.user:
+                        client_list[user].write(message)
+                break
+            else:
+                message = "<{0}> {1}".format(self.user,data)
+                print message # Print message from server
+                for user in connected_users:
+                    if user!=self.user:
+                        client_list[user].write(message)
+
+class newconnection(threading.Thread):
+     def run(self):
+        global client_list
+        global connected_users
+        print "[SERVER LISTENING FOR CONNECTIONS]"
+        while True:
+            connection, address = srvsock.accept()
+            connection = ssl.wrap_socket(connection, server_side=True, ca_certs="ca_certs", keyfile=keyfilename, certfile=certfilename, cert_reqs=ssl.CERT_REQUIRED, ssl_version=ssl.PROTOCOL_SSLv3)
+
+            peersubject = connection.getpeercert()['subject']
+            for line in peersubject:
+                line=line[0]
+                if line[0] == "commonName":
+                    user=line[1]
+                    break
+
+            print "[{0} ATTEMPTING TO CONNECT]".format(user)
+
+            if user in users and user not in connected_users: #don't allow people to connect twice
+                print "[USER "+user+" IDENTIFIED & CONNECTED]"
+                client_list[user] = connection
+                connected_users.add(user)
+                servrec = servreceiving(user,connection)
+                servrec.start()
+            else:
+                connection.close()
+
+myself=sys.argv[0]
+mode = sys.argv[1]
+name = sys.argv[2]
+keyfilename = "keys/{0}.priv".format(name)
+certfilename = "keys/{0}.cert".format(name)
 
 # ./cliserv.py s $name $port $numusers $user1 $user2 ...
-if (sys.argv[1] == "s"):
-	# Make socket
-	srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-	
-	### SERVER SSL ###
-	context = SSL.Context(SSL.SSLv3_METHOD)
-	context.use_privatekey_file('key')
-	context.use_certificate_file('cert')
-	srvsock = SSL.Connection(context, srvsock)
-	##################
+if (mode == "s"):
+    if len(sys.argv) < 5 :
+        print>>sys.stderr, "USAGE: {0} s $name $port $numusers $user1 $user2 ...".format(myself)
+        sys.exit(1)
 
-	openUsers()
+    port=int(sys.argv[3])
+    numusers=int(sys.argv[4])
 
-	srvsock.bind( ('', int(sys.argv[3]))) 
-	srvsock.listen( 5 )
-	
-	n = newconnection()
-	n.start()
-	s = sending()
-	s.start()
+    if len(sys.argv) < 5 + numusers:
+        print>>sys.stderr, "USAGE: {0} $name $port $numusers $user1 $user2 ...".format(myself)
+        sys.exit(1)
 
-	s.join()
-	srvsock.close()
-	
+    users = sys.argv[5:5+numusers]
+
+    # Make socket
+    srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
+    srvsock.bind( ('', port))
+    srvsock.listen( MAX_QUEUED_CONNECTIONS )
+
+    n = newconnection()
+    n.start()
+
+    s = sending()
+    s.start()
+
+    s.join()
+    n.join()
+
 #./cliserv.py c $name $address:port $serveruser
-if (sys.argv[1] == "c"):
-	clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-	if sys.argv[3].find(":") == -1:
-		clisock.connect( (sys.argv[3], 31337) )
-	else:
-		addressport = sys.argv[3].split(":")
-		clisock.connect( (addressport[0], int(addressport[1])) )
+elif (mode == "c"):
+    if len(sys.argv) < 5:
+        print>>sys.stderr, "USAGE: {0} $name $address[:port] $serveruser".format(myself)
+        sys.exit(1)
 
-	### CLIENT SSL ###
-	#clisock = socket.ssl(clisock)
-	clisock = ssl.wrap_socket(clisock, ca_certs="cert", cert_reqs=ssl.CERT_REQUIRED)
-	##################
+    port = DEFAULT_PORT
+    addressport = sys.argv[3].split(":")
+    address = addressport[0]
+    if len(addressport) > 1:
+        port = int(addressport[1])
 
-	serverkey = open('keys/'+sys.argv[4]+'.pub').read()
+    serveruser = sys.argv[4]
 
-	data = encrypt(serverkey,sys.argv[2])
-	clisock.write(data)
+    clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
 
-	print "[CONNECTED TO SERVER]"	
-	r = receiving()
-	r.start()
-	s = sending()
-	s.start()
-	
-	s.join()
-	r.join()
+    ## CLIENT SSL ###
+    #clisock = socket.ssl(clisock)
+    clisock = ssl.wrap_socket(clisock, ca_certs="ca_certs", keyfile=keyfilename, certfile=certfilename, cert_reqs=ssl.CERT_REQUIRED, ssl_version=ssl.PROTOCOL_SSLv3)
+    if clisock.connect( (address,port) ) == -1:
+        print>>sys.stderr, "Failed to connect, exiting."
+        sys.exit(1)
 
+    ##################
 
+    peersubject = clisock.getpeercert()['subject']
+    for line in peersubject:
+        line=line[0]
+        if line[0] == "commonName":
+            peername=line[1]
+            break
 
+    if peername != serveruser:
+        clisock.close()
+        print>>sys.stderr, "Server is not {0}".format(serveruser)
+        sys.exit(1)
+
+    r = receiving()
+    r.start()
+    s = sending()
+    s.start()
+
+    s.join()
+    r.join()
