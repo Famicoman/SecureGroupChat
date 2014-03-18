@@ -1,23 +1,28 @@
-all:
-	chmod +x cliserv.py
-	chmod +x keymaker.py
-	openssl genrsa 4096 > key
-	openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
-	
-server:
-	./cliserv.py s mike 31337 2 luke bob
+ready:
+    chmod +x cliserv.py
+    chmod +x keymaker.py
+    mkdir keys
+    openssl genrsa 4096 > keys/mike.priv
+    openssl req -new -x509 -nodes -sha1 -days 365 -key keys/mike.priv > keys/mike.cert
+    openssl genrsa 4096 > keys/luke.priv
+    openssl req -new -x509 -nodes -sha1 -days 365 -key keys/luke.priv > keys/luke.cert
+    openssl genrsa 4096 > keys/bob.priv
+    openssl req -new -x509 -nodes -sha1 -days 365 -key keys/bob.priv > keys/bob.cert
+    cat keys/mike.cert > ca_certs
+    cat keys/luke.cert >> ca_certs
+    cat keys/bob.cert >> ca_certs
+    touch ready
+    
+server: ready
+    ./cliserv.py s mike 31337 2 luke bob
 
-clientluke:
-	./cliserv.py c luke 127.0.0.1:31337 mike
+clientluke: ready
+    ./cliserv.py c luke 127.0.0.1:31337 mike
 
-clientbob:
-	./cliserv.py c bob 127.0.0.1:31337 mike
-
-generate:
-	./keymaker.py mike
-	./keymaker.py luke
-	./keymaker.py bob
+clientbob: ready
+    ./cliserv.py c bob 127.0.0.1:31337 mike
 
 clean:
-	rm key
-	rm cert
+    rm -rf keys
+    rm ca_certs
+    rm ready
