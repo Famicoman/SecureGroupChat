@@ -1,6 +1,5 @@
 ready:
 	chmod +x cliserv.py
-	chmod +x keymaker.py
 	mkdir keys
 	openssl genrsa 4096 > keys/mike.priv
 	openssl req -new -x509 -nodes -sha1 -days 365 -key keys/mike.priv > keys/mike.cert
