@@ -5,8 +5,9 @@
 #
 # openssl genrsa 4096 > key
 # openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
+#
 
-import sys
+import sys               
 import socket
 import threading
 import os
@@ -22,17 +23,22 @@ class sending(threading.Thread):
     def run(self):
         print "[TYPE TO SEND MESSAGE (/q TO QUIT)]"
 
-        exit=False
-        while not exit:
+        while True:
             data = sys.stdin.readline().strip()
             if data.startswith("/q"):
-                exit = True
-
+                break
+                
             if mode == "s":
-               for user in client_list:
-                   client_list[user].write("<"+name+"> "+data)
+                for user in client_list:
+                    client_list[user].write("<"+name+"> "+data)
             else:
-                clisock.write(data) # Send command
+                clisock.write(data) # Send command  
+
+        if mode == "s":
+            for user in client_list:
+                client_list[user].write('/q')
+        else:
+            clisock.write('/q') # Send command
 
         print "[YOU HAVE EXITED]"
         if (mode == "s"):
@@ -40,7 +46,7 @@ class sending(threading.Thread):
                 client_list[user].close()
             srvsock.close() # This causes a crash on the server 
 
-        os._exit(1)
+        os._exit(0) 
 
 class receiving(threading.Thread):
     def run(self):
@@ -51,9 +57,9 @@ class receiving(threading.Thread):
                 os._exit(1)
                 #exit = 1
 
-            if data.find("/q")!=-1:#startswith("/q"):
+            if data.startswith("/q"):
                 print "[SERVER EXITED - CLOSING CHAT]"
-                os._exit(1)
+                os._exit(0)
                 #exit = 1;
             else:
                 print data
@@ -64,21 +70,26 @@ class servreceiving(threading.Thread):
         self.user = user
         self.connection = connection
         threading.Thread.__init__(self)
-
+    
     def run(self):
         global client_list
         global connected_users
 
         while True:
             data = self.connection.read()
-            if data.find("/q")!=-1:
+            if len(data) == 0: #not really sure what read does if there's a socket error, not much documentation, hopefully this is right 
+                print>>sys.stderr, "SOCKET ERROR - CLOSING"
+                os._exit(1)
+                #exit = 1
+
+            if data.startswith("/q"):
                 self.connection.write("/q")
                 client_list[self.user].close()
                 del client_list[self.user]
                 connected_users.remove(self.user)
 
                 message = "[{0} HAS EXITED]".format(self.user)
-                print message
+                print message                 
 
                 for user in connected_users:
                     if user!=self.user:
@@ -90,7 +101,7 @@ class servreceiving(threading.Thread):
                 for user in connected_users:
                     if user!=self.user:
                         client_list[user].write(message)
-
+                
 class newconnection(threading.Thread):
      def run(self):
         global client_list
@@ -129,10 +140,10 @@ if (mode == "s"):
     if len(sys.argv) < 5 :
         print>>sys.stderr, "USAGE: {0} s $name $port $numusers $user1 $user2 ...".format(myself)
         sys.exit(1)
-
+    
     port=int(sys.argv[3])
     numusers=int(sys.argv[4])
-
+    
     if len(sys.argv) < 5 + numusers:
         print>>sys.stderr, "USAGE: {0} $name $port $numusers $user1 $user2 ...".format(myself)
         sys.exit(1)
@@ -141,9 +152,9 @@ if (mode == "s"):
 
     # Make socket
     srvsock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-    srvsock.bind( ('', port))
+    srvsock.bind( ('', port)) 
     srvsock.listen( MAX_QUEUED_CONNECTIONS )
-
+    
     n = newconnection()
     n.start()
 
@@ -166,7 +177,7 @@ elif (mode == "c"):
         port = int(addressport[1])
 
     serveruser = sys.argv[4]
-
+ 
     clisock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
 
     ## CLIENT SSL ###
@@ -194,6 +205,6 @@ elif (mode == "c"):
     r.start()
     s = sending()
     s.start()
-
+    
     s.join()
     r.join()
