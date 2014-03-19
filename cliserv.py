@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 # Hybrid Client/Server
+# Written by Mike & Luke
 #
-# - YOU MUST RUN THESE FOR CERT/KEY CREATION -
-#
-# openssl genrsa 4096 > key
-# openssl req -new -x509 -nodes -sha1 -days 365 -key key > cert
+# - YOU MUST RUN make FOR CERT/KEY CREATION -
 #
 
 import sys               
@@ -32,6 +30,8 @@ class sending(threading.Thread):
                 for user in client_list:
                     client_list[user].write("<"+name+"> "+data)
             else:
+		if len(data)==0:
+                    data = " "
                 clisock.write(data) # Send command  
 
         if mode == "s":
@@ -44,7 +44,7 @@ class sending(threading.Thread):
         if (mode == "s"):
             for user in client_list:
                 client_list[user].close()
-            srvsock.close() # This causes a crash on the server 
+            srvsock.close() 
 
         os._exit(0) 
 
